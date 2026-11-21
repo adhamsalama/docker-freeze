@@ -42,10 +42,15 @@ on_error() {
   docker ps -a || true
   docker logs --tail 50 "$C" 2>&1 || true
   sudo find /var/lib/docker /run/containerd /var/lib/containerd \
-    \( -name dump.log -o -name restore.log \) 2>/dev/null |
+    \( -name dump.log -o -name restore.log -o -name 'criu-*.log' \) 2>/dev/null |
     while read -r f; do
       echo "--- $f"
       sudo tail -n 60 "$f"
+      # Also emit it as an annotation (readable via the public API).
+      sudo tail -n 40 "$f" |
+        awk -v name="$(basename "$f")" '
+          { gsub(/%/, "%25"); gsub(/\r/, "%0D"); out = out $0 "%0A" }
+          END { printf "::error title=%s::%s\n", name, out }'
     done || true
   sudo journalctl -u docker -u containerd --since '-15 min' --no-pager | tail -n 80 || true
   exit "$rc"
