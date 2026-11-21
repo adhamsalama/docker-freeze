@@ -79,7 +79,10 @@ baseline_host=$(host_used_mb)
 log "Starting $C"
 # No published ports: CRIU can't checkpoint established TCP connections,
 # and every mongosh call below goes through `docker exec` instead.
-docker run -d --name "$C" "$IMAGE" >/dev/null
+# --network host: with Docker's default networking, `docker start --checkpoint`
+# fails ("bind-mount /proc/0/ns/net ...") because Docker connects the network
+# before containerd has restored the process.
+docker run -d --name "$C" --network host "$IMAGE" >/dev/null
 wait_for_mongo
 
 log "Loading ~${DATA_MB}MB into mongod's cache"
