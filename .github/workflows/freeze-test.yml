@@ -26,6 +26,14 @@ jobs:
           criu --version
           sudo criu check || echo "::warning::criu check reported problems"
 
+      # Docker never sets CRIU's --file-locks, and mongod holds file locks
+      # (mongod.lock, WiredTiger.lock). runc reads extra CRIU options from
+      # /etc/criu/runc.conf on checkpoint and restore.
+      - name: Configure CRIU options for runc
+        run: |
+          sudo mkdir -p /etc/criu
+          echo 'file-locks' | sudo tee /etc/criu/runc.conf
+
       - name: Enable Docker experimental mode
         run: |
           f=/etc/docker/daemon.json
