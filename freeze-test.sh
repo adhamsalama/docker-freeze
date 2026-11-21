@@ -15,7 +15,8 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN { printf "%.2f", b - a }'; }
 
 host_used_mb() { free -m | awk '/^Mem:/ { print $3 }'; }
-mongod_rss_mb() { ps -C mongod -o rss= | awk '{ s += $1 } END { printf "%d", s / 1024 }'; }
+# `ps -C` exits 1 when no mongod is running (e.g. while frozen); treat that as 0.
+mongod_rss_mb() { { ps -C mongod -o rss= || true; } | awk '{ s += $1 } END { printf "%d", s / 1024 }'; }
 container_mem() { docker stats --no-stream --format '{{.MemUsage}}' "$C" | cut -d/ -f1 | xargs; }
 mongo_eval() { docker exec "$C" mongosh --quiet --eval "$1"; }
 
@@ -153,6 +154,10 @@ EOF
 log "Result"
 echo "$result"
 echo "$result" >>"$SUMMARY"
+# Also emit it as an annotation (readable via the public API).
+printf '%s\n' "$result" |
+  awk '{ gsub(/%/, "%25"); gsub(/\r/, "%0D"); out = out $0 "%0A" }
+       END { printf "::notice title=Freeze test result::%s\n", out }'
 
 [[ $state == preserved ]] || {
   echo "::error::in-memory state was lost after restore"
