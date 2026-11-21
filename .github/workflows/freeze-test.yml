@@ -32,7 +32,9 @@ jobs:
       - name: Configure CRIU options for runc
         run: |
           sudo mkdir -p /etc/criu
-          echo 'file-locks' | sudo tee /etc/criu/runc.conf
+          # log-file: keep CRIU's log somewhere that survives a failed
+          # restore (containerd deletes its work dir).
+          printf 'file-locks\nlog-file /tmp/criu.log\n' | sudo tee /etc/criu/runc.conf
 
       - name: Enable Docker experimental mode
         run: |

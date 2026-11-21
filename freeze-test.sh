@@ -29,6 +29,17 @@ wait_for_mongo() {
   return 1
 }
 
+# Emit stdin as a GitHub annotation (readable via the public API).
+annotate() {
+  awk -v level="$1" -v title="$2" '
+    { gsub(/%/, "%25"); gsub(/\r/, "%0D"); out = out $0 "%0A" }
+    END { if (out != "") printf "::%s title=%s::%s\n", level, title, out }'
+}
+
+# Keep a copy of the script's stderr so failures can report it.
+ERRLOG=$(mktemp)
+exec 2> >(tee -a "$ERRLOG" >&2)
+
 on_error() {
   local rc=$? line=$1 cmd=$2
   trap - ERR
@@ -40,20 +51,20 @@ on_error() {
   } >>"$SUMMARY"
 
   log "Diagnostics"
+  sleep 1 # let the stderr tee catch up
+  tail -n 30 "$ERRLOG" | annotate error "stderr"
   docker ps -a || true
   docker logs --tail 50 "$C" 2>&1 || true
-  sudo find /var/lib/docker /run/containerd /var/lib/containerd \
-    \( -name dump.log -o -name restore.log -o -name 'criu-*.log' \) 2>/dev/null |
+  sudo find /var/lib/docker /run/containerd /var/lib/containerd /tmp \
+    \( -name dump.log -o -name restore.log -o -name 'criu*.log' \) 2>/dev/null |
     while read -r f; do
       echo "--- $f"
       sudo tail -n 60 "$f"
-      # Also emit it as an annotation (readable via the public API).
-      sudo tail -n 40 "$f" |
-        awk -v name="$(basename "$f")" '
-          { gsub(/%/, "%25"); gsub(/\r/, "%0D"); out = out $0 "%0A" }
-          END { printf "::error title=%s::%s\n", name, out }'
+      sudo tail -n 40 "$f" | annotate error "$(basename "$f")"
     done || true
   sudo journalctl -u docker -u containerd --since '-15 min' --no-pager | tail -n 80 || true
+  sudo journalctl -u docker -u containerd --since '-15 min' --no-pager -o cat |
+    grep -iE 'level=(error|fatal)|criu|failed' | tail -n 25 | annotate error "dockerd/containerd errors" || true
   exit "$rc"
 }
 trap 'on_error $LINENO "$BASH_COMMAND"' ERR
@@ -155,9 +166,7 @@ log "Result"
 echo "$result"
 echo "$result" >>"$SUMMARY"
 # Also emit it as an annotation (readable via the public API).
-printf '%s\n' "$result" |
-  awk '{ gsub(/%/, "%25"); gsub(/\r/, "%0D"); out = out $0 "%0A" }
-       END { printf "::notice title=Freeze test result::%s\n", out }'
+printf '%s\n' "$result" | annotate notice "Freeze test result"
 
 [[ $state == preserved ]] || {
   echo "::error::in-memory state was lost after restore"
