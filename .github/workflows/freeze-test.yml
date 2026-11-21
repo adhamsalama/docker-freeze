@@ -1,0 +1,44 @@
+name: freeze-test
+
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Image to freeze
+        default: mongo:7
+      data_mb:
+        description: Approximate MB of data to load into mongod
+        default: "300"
+
+jobs:
+  freeze:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install CRIU
+        run: |
+          sudo add-apt-repository -y ppa:criu/ppa
+          sudo apt-get update -q
+          sudo apt-get install -y -q criu
+          criu --version
+          sudo criu check || echo "::warning::criu check reported problems"
+
+      - name: Enable Docker experimental mode
+        run: |
+          f=/etc/docker/daemon.json
+          [ -f "$f" ] || echo '{}' | sudo tee "$f" >/dev/null
+          sudo jq '. + {experimental: true}' "$f" | sudo tee "$f.new" >/dev/null
+          sudo mv "$f.new" "$f"
+          cat "$f"
+          sudo systemctl restart docker
+          docker info --format 'server={{.ServerVersion}} experimental={{.ExperimentalBuild}} cgroup=v{{.CgroupVersion}} kernel={{.KernelVersion}}'
+          [ "$(docker info --format '{{.ExperimentalBuild}}')" = true ]
+
+      - name: Freeze / unfreeze test
+        env:
+          IMAGE: ${{ inputs.image || 'mongo:7' }}
+          DATA_MB: ${{ inputs.data_mb || '300' }}
+        run: bash ./freeze-test.sh
